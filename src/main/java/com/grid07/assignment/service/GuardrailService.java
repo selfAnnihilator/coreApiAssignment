@@ -29,12 +29,28 @@ public class GuardrailService {
         this.atomicIncrIfBelowCapScript = atomicIncrIfBelowCapScript;
     }
 
+    /**
+     * All three guardrail checks run in order before any DB write.
+     * Order matters: pure checks first, side-effect writes last.
+     * 1. Vertical cap   — pure check, no Redis write
+     * 2. Cooldown check — pure READ only (existence check, no write yet)
+     * 3. Horizontal cap — atomic INCR (write), rejects if over cap
+     * 4. Cooldown SET   — only reached if ALL checks pass; sets TTL key
+     *
+     * This ordering prevents the cooldown being set for a bot whose comment
+     * was rejected by the horizontal cap.
+     */
     public void checkAndReserveBotSlot(Long postId, Long botId, Long postAuthorId, int depthLevel) {
         checkVerticalCap(depthLevel);
-        checkCooldown(botId, postAuthorId);
-        checkAndIncrementHorizontalCap(postId);
+        checkCooldownExists(botId, postAuthorId);      // READ only — no side effect
+        checkAndIncrementHorizontalCap(postId);        // INCR — may throw 429
+        setCooldown(botId, postAuthorId);              // WRITE — only if all above passed
     }
 
+    /**
+     * Release the reserved horizontal cap slot if the DB write fails.
+     * Keeps Redis and Postgres consistent on error paths.
+     */
     public void releaseBotSlot(Long postId) {
         String key = String.format(BOT_COUNT_KEY, postId);
         redisTemplate.opsForValue().decrement(key);
@@ -47,21 +63,24 @@ public class GuardrailService {
         }
     }
 
-    private void checkCooldown(Long botId, Long humanId) {
+    private void checkCooldownExists(Long botId, Long humanId) {
         String key = String.format(COOLDOWN_KEY, botId, humanId);
-        Boolean exists = redisTemplate.hasKey(key);
-        if (Boolean.TRUE.equals(exists)) {
+        if (Boolean.TRUE.equals(redisTemplate.hasKey(key))) {
             throw new GuardrailException(
                 "Cooldown active: bot " + botId + " cannot interact with user " + humanId +
                 " more than once per " + COOLDOWN_MINUTES + " minutes");
         }
+    }
+
+    private void setCooldown(Long botId, Long humanId) {
+        String key = String.format(COOLDOWN_KEY, botId, humanId);
         redisTemplate.opsForValue().set(key, "1", Duration.ofMinutes(COOLDOWN_MINUTES));
     }
 
     /**
      * Atomically increments the bot reply counter only if it stays at or below HORIZONTAL_CAP.
-     * Lua script runs as a single atomic Redis operation — closes the race window between
-     * read and write that would otherwise allow > 100 concurrent bot comments.
+     * The Lua script collapses read-check-write into one indivisible Redis operation,
+     * preventing the race where 200 concurrent threads all read "99" and all increment.
      */
     private void checkAndIncrementHorizontalCap(Long postId) {
         String key = String.format(BOT_COUNT_KEY, postId);
