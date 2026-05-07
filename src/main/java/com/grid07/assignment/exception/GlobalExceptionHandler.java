@@ -21,4 +21,11 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest()
                 .body(Map.of("error", ex.getMessage()));
     }
+
+    @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
+    public ResponseEntity<Map<String, String>> handleDataIntegrity(
+            org.springframework.dao.DataIntegrityViolationException ex) {
+        return ResponseEntity.badRequest()
+                .body(Map.of("error", "Constraint violation: " + ex.getMostSpecificCause().getMessage()));
+    }
 }
