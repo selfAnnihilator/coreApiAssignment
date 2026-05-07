@@ -61,7 +61,19 @@ Server starts on `http://localhost:8080`.
 
 ## Thread Safety for Atomic Locks (Phase 2)
 
-The critical race condition is the **horizontal cap**: 200 concurrent bot requests could each read `bot_count = 99`, all pass the check, then all INCR — ending up at 299.
+Two race conditions exist; both are solved with atomic Redis operations.
+
+### Race 1: Cooldown Cap
+
+Naive approach (EXISTS → SET) has a window where 200 concurrent threads all see "no key" and all pass.
+
+**Solution**: `SET NX EX` (`setIfAbsent` in Spring Data Redis) — check and set are one indivisible Redis operation. Exactly one thread wins; all others get `false` → 429.
+
+If the subsequent horizontal cap check rejects, the cooldown key is deleted so the bot isn't unfairly penalized.
+
+### Race 2: Horizontal Cap
+
+200 concurrent bot requests could each read `bot_count = 99`, all pass the check, then all INCR — ending up at 299.
 
 ### Solution: Redis Lua Script
 
@@ -98,3 +110,20 @@ No `HashMap`, `AtomicInteger`, or `static` variables are used anywhere. All stat
 | Virality score | `post:{id}:virality_score` |
 
 Multiple app instances can run behind a load balancer and share the same Redis — the Lua script guarantees correctness regardless of which instance handles each request.
+
+---
+
+## Running Tests
+
+```bash
+mvn test
+```
+
+35 unit tests, no Docker or running app required.
+
+| Suite | Tests | Covers |
+|-------|-------|--------|
+| `GuardrailServiceTest` | 14 | All 3 guardrails, edge cases, rollbacks |
+| `ViralityServiceTest` | 6 | Point values (+1/+20/+50), key format |
+| `NotificationServiceTest` | 4 | Throttle logic, pending queue format |
+| `PostServiceTest` | 11 | Full comment/like flows, DB rollback |

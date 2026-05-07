@@ -30,21 +30,23 @@ public class GuardrailService {
     }
 
     /**
-     * All three guardrail checks run in order before any DB write.
-     * Order matters: pure checks first, side-effect writes last.
+     * All three guardrail checks run atomically before any DB write.
      * 1. Vertical cap   — pure check, no Redis write
-     * 2. Cooldown check — pure READ only (existence check, no write yet)
-     * 3. Horizontal cap — atomic INCR (write), rejects if over cap
-     * 4. Cooldown SET   — only reached if ALL checks pass; sets TTL key
+     * 2. Cooldown cap   — atomic SET NX EX (set-if-absent); throws if key already exists
+     * 3. Horizontal cap — atomic INCR via Lua; if exceeded, cooldown key is rolled back
      *
-     * This ordering prevents the cooldown being set for a bot whose comment
-     * was rejected by the horizontal cap.
+     * Cooldown uses SET NX so the check+set is one indivisible Redis operation —
+     * no two concurrent threads can both see "no cooldown" and both succeed.
      */
     public void checkAndReserveBotSlot(Long postId, Long botId, Long postAuthorId, int depthLevel) {
         checkVerticalCap(depthLevel);
-        checkCooldownExists(botId, postAuthorId);      // READ only — no side effect
-        checkAndIncrementHorizontalCap(postId);        // INCR — may throw 429
-        setCooldown(botId, postAuthorId);              // WRITE — only if all above passed
+        trySetCooldown(botId, postAuthorId);           // atomic SET NX EX — throws if exists
+        try {
+            checkAndIncrementHorizontalCap(postId);    // Lua INCR — may throw 429
+        } catch (GuardrailException e) {
+            releaseCooldown(botId, postAuthorId);      // rollback cooldown if horizontal cap rejects
+            throw e;
+        }
     }
 
     /**
@@ -56,6 +58,10 @@ public class GuardrailService {
         redisTemplate.opsForValue().decrement(key);
     }
 
+    public void releaseCooldown(Long botId, Long humanId) {
+        redisTemplate.delete(String.format(COOLDOWN_KEY, botId, humanId));
+    }
+
     private void checkVerticalCap(int depthLevel) {
         if (depthLevel > VERTICAL_CAP) {
             throw new GuardrailException(
@@ -63,18 +69,21 @@ public class GuardrailService {
         }
     }
 
-    private void checkCooldownExists(Long botId, Long humanId) {
+    /**
+     * Atomically sets the cooldown key only if it does not already exist (SET NX EX).
+     * Returns true and sets TTL if the key was absent (slot acquired).
+     * Throws GuardrailException if the key already existed (cooldown active).
+     * This collapses EXISTS + SET into one Redis round-trip with no race window.
+     */
+    private void trySetCooldown(Long botId, Long humanId) {
         String key = String.format(COOLDOWN_KEY, botId, humanId);
-        if (Boolean.TRUE.equals(redisTemplate.hasKey(key))) {
+        Boolean acquired = redisTemplate.opsForValue()
+                .setIfAbsent(key, "1", Duration.ofMinutes(COOLDOWN_MINUTES));
+        if (!Boolean.TRUE.equals(acquired)) {
             throw new GuardrailException(
                 "Cooldown active: bot " + botId + " cannot interact with user " + humanId +
                 " more than once per " + COOLDOWN_MINUTES + " minutes");
         }
-    }
-
-    private void setCooldown(Long botId, Long humanId) {
-        String key = String.format(COOLDOWN_KEY, botId, humanId);
-        redisTemplate.opsForValue().set(key, "1", Duration.ofMinutes(COOLDOWN_MINUTES));
     }
 
     /**

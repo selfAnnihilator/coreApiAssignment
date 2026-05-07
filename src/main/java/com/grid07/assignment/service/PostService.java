@@ -68,8 +68,8 @@ public class PostService {
             try {
                 comment = saveComment(postId, req, depthLevel);
             } catch (Exception e) {
-                // Keep Redis bot-count consistent with DB on failure
                 guardrailService.releaseBotSlot(postId);
+                guardrailService.releaseCooldown(req.getAuthorId(), postOwnerId);
                 throw e;
             }
 

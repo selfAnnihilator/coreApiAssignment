@@ -41,7 +41,10 @@ See `service/ViralityService.java`.
 | Vertical Cap | depth > 20 | (no Redis key needed) | HTTP 429 | Done |
 | Cooldown Cap | 1 interaction/10 min | `cooldown:bot_{id}:human_{id}` TTL 10 min | HTTP 429 | Done |
 
-**Thread safety detail**: Horizontal cap uses a Redis Lua script (defined in `config/RedisConfig.java`) that atomically INCRs and checks in a single operation. No read-modify-write gap. Script returns `-1` if cap would be exceeded — at that point the counter is left unchanged.
+**Thread safety detail**:
+- **Cooldown cap** uses `SET NX EX` (`setIfAbsent` in Spring Data Redis) — the check and set are one indivisible Redis operation. No two concurrent threads can both see "no cooldown" and both succeed.
+- **Horizontal cap** uses a Redis Lua script (defined in `config/RedisConfig.java`) that atomically INCRs and checks in a single operation. No read-modify-write gap. Script returns `-1` if cap would be exceeded — at that point the counter is left unchanged.
+- If the horizontal cap rejects after the cooldown was set, the cooldown key is deleted (rolled back) so the bot is not unfairly penalized for a rejected request.
 
 See `service/GuardrailService.java`.
 
@@ -105,9 +108,10 @@ These were added beyond the PDF requirements to make the service fully usable an
 ### 4. `authorType` enum on Post and Comment
 - The spec says `author_id` can be User or Bot but gives no schema hint for how to distinguish them. Added `author_type` column (values: `USER`, `BOT`) as the discriminator. This lets the API route logic correctly without a union table or separate columns.
 
-### 5. Guardrail execution order fix (correctness improvement)
-- Naive implementation would check cooldown and set it optimistically, then check horizontal cap. If horizontal cap rejected, the cooldown would be set even though the comment was rejected — meaning the bot would be blocked from retrying for 10 minutes unfairly.
-- Fixed: order is now (1) vertical check, (2) cooldown existence check (read-only), (3) horizontal cap increment (Lua), (4) cooldown set. Side-effect writes only happen after all checks pass.
+### 5. Atomic cooldown cap with `SET NX EX`
+- Naive implementation uses EXISTS then SET — race window exists where 200 concurrent threads all see "no key" and all pass.
+- Fixed: replaced with `setIfAbsent(key, "1", Duration.ofMinutes(10))` which maps to Redis `SET NX EX` — check and set are one indivisible operation. Exactly one thread wins; all others get rejected immediately.
+- Execution order: (1) vertical check, (2) atomic cooldown SET NX (throws if exists), (3) horizontal cap Lua INCR. If horizontal cap rejects, the cooldown key is deleted so the bot is not penalized for a rejected request.
   See `service/GuardrailService.java:checkAndReserveBotSlot`.
 
 ### 6. Redis Set for pending-notification tracking
@@ -119,6 +123,13 @@ These were added beyond the PDF requirements to make the service fully usable an
 
 ### 8. Input author validation on post creation
 - `createPost` verifies the `authorId` exists in the `users` or `bots` table before persisting. Prevents orphan posts pointing to non-existent authors.
+
+### 9. Unit test suite (35 tests, zero infrastructure required)
+- `GuardrailServiceTest` — 14 tests covering all 3 guardrails, edge cases (depth=20 passes, depth=21 rejects, exactly 100 passes), and rollback paths.
+- `ViralityServiceTest` — 6 tests verifying point values (+1/+20/+50), Redis key format, and null-score handling.
+- `NotificationServiceTest` — 4 tests verifying throttle logic, pending queue format, and cooldown key naming.
+- `PostServiceTest` — 11 tests covering human/bot comment flows, guardrail rejection (no DB write), DB failure rollback (bot slot + cooldown released), and depth-level computation.
+- Run with `mvn test` — no Docker or running app needed.
 
 ---
 
