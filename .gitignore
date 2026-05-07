@@ -9,3 +9,7 @@ target/
 *.log
 .env
 application-local.yml
+
+# Claude Code
+.claude/
+.code-review-graph/

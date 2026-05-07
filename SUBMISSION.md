@@ -72,7 +72,7 @@ Summarized Push Notification: Bot X and [N] others interacted with your posts.
 |---|---|
 | Race condition (200 concurrent bots) | Lua script in `RedisConfig.atomicIncrIfBelowCapScript` — single atomic Redis op, impossible to exceed 100 |
 | Statelessness | Zero `HashMap`, `static` mutable fields, or instance state — all counters/TTLs live in Redis |
-| Data integrity | In `PostService.addComment`: Redis guardrail runs BEFORE `@Transactional` DB write; if guardrail throws, no DB transaction opens; if DB write fails after guardrail passed, `releaseBotSlot()` decrements the Redis counter |
+| Data integrity | In `PostService.addComment`: `@Transactional` opens a DB transaction at method entry, but no DB write is issued until after all Redis guardrails pass. If a guardrail throws, the transaction rolls back as a no-op — nothing was written. If the DB write fails after the guardrail incremented `bot_count`, `releaseBotSlot()` decrements the counter to keep Redis and Postgres consistent. |
 
 ---
 
