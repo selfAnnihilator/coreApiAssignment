@@ -30,7 +30,7 @@
 | Human Like | +20 | `post:{id}:virality_score` | Done |
 | Human Comment | +50 | `post:{id}:virality_score` | Done |
 
-All updates use `INCRBY` — atomic by design, no race condition possible.
+All updates use Spring's `redisTemplate.opsForValue().increment()` which maps to Redis `INCRBY` — atomic by design, no race condition possible.
 See `service/ViralityService.java`.
 
 #### Atomic Locks (Concurrency Protection)
@@ -52,12 +52,12 @@ See `service/GuardrailService.java`.
 | Requirement | Status | Location |
 |---|---|---|
 | Check if user has received notification in last 15 min | Done | `service/NotificationService.java` |
-| If YES: push message to `user:{id}:pending_notifs` | Done | `service/NotificationService.java:35` |
-| If NO: log "Push Notification Sent to User" + set 15-min cooldown | Done | `service/NotificationService.java:39` |
+| If YES: push message to `user:{id}:pending_notifs` | Done | `service/NotificationService.java:38` |
+| If NO: log "Push Notification Sent to User" + set 15-min cooldown | Done | `service/NotificationService.java:43` |
 | `@Scheduled` sweeper every 5 minutes | Done | `scheduler/NotificationSweeper.java:33` |
 | Scan all users with pending notifications | Done | via `users:pending:notifs` Redis Set |
-| Pop all messages, count, log summarized message | Done | `scheduler/NotificationSweeper.java:58-71` |
-| Clear Redis list for each user | Done | `scheduler/NotificationSweeper.java:74` |
+| Pop all messages, count, log summarized message | Done | `scheduler/NotificationSweeper.java:68-71` |
+| Clear Redis list for each user | Done | `scheduler/NotificationSweeper.java:75` |
 
 Exact log format produced by sweeper:
 ```
