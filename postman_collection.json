@@ -1,0 +1,159 @@
+{
+  "info": {
+    "name": "Grid07 Assignment API",
+    "_postman_id": "grid07-assignment-collection",
+    "description": "API collection for Grid07 Backend Engineering Assignment",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Create User",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/api/users", "host": ["{{baseUrl}}"], "path": ["api","users"]},
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"alice\",\n  \"isPremium\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "List Users",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{baseUrl}}/api/users", "host": ["{{baseUrl}}"], "path": ["api","users"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bots",
+      "item": [
+        {
+          "name": "Create Bot",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/api/bots", "host": ["{{baseUrl}}"], "path": ["api","bots"]},
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"NewsBot\",\n  \"personaDescription\": \"A bot that shares news articles\"\n}"
+            }
+          }
+        },
+        {
+          "name": "List Bots",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{baseUrl}}/api/bots", "host": ["{{baseUrl}}"], "path": ["api","bots"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Posts",
+      "item": [
+        {
+          "name": "Create Post (by User)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/api/posts", "host": ["{{baseUrl}}"], "path": ["api","posts"]},
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"authorId\": 1,\n  \"authorType\": \"USER\",\n  \"content\": \"Hello world! This is my first post.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Create Post (by Bot)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/api/posts", "host": ["{{baseUrl}}"], "path": ["api","posts"]},
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"authorId\": 1,\n  \"authorType\": \"BOT\",\n  \"content\": \"Breaking news: Spring Boot 3.2 released!\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Comments",
+      "item": [
+        {
+          "name": "Add Top-Level Comment (by User)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/api/posts/1/comments", "host": ["{{baseUrl}}"], "path": ["api","posts","1","comments"]},
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"authorId\": 1,\n  \"authorType\": \"USER\",\n  \"content\": \"Great post!\",\n  \"parentCommentId\": null\n}"
+            }
+          }
+        },
+        {
+          "name": "Add Bot Reply (depth 0 — triggers guardrails)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/api/posts/1/comments", "host": ["{{baseUrl}}"], "path": ["api","posts","1","comments"]},
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"authorId\": 1,\n  \"authorType\": \"BOT\",\n  \"content\": \"Thanks for sharing!\",\n  \"parentCommentId\": null\n}"
+            }
+          }
+        },
+        {
+          "name": "Add Nested Reply (reply to comment)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/api/posts/1/comments", "host": ["{{baseUrl}}"], "path": ["api","posts","1","comments"]},
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"authorId\": 1,\n  \"authorType\": \"BOT\",\n  \"content\": \"Interesting point!\",\n  \"parentCommentId\": 1\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Likes & Virality",
+      "item": [
+        {
+          "name": "Like Post (by User — +20 virality)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/api/posts/1/like", "host": ["{{baseUrl}}"], "path": ["api","posts","1","like"]},
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"authorId\": 1,\n  \"authorType\": \"USER\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Virality Score",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{baseUrl}}/api/posts/1/virality", "host": ["{{baseUrl}}"], "path": ["api","posts","1","virality"]}
+          }
+        }
+      ]
+    }
+  ]
+}
